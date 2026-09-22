@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-本仓库集成了 [social-auto-upload](https://github.com/dreammis/social-auto-upload)（11.3k stars）作为多平台社交媒体自动发布 skill。
+本仓库集成了 [social-auto-upload](https://github.com/dreammis/social-auto-upload)（11.3k stars）作为多平台社交媒体自动发布 skill，以及 [a-stock-data](https://github.com/simonlin1212/a-stock-data) 作为 A 股行情/财务/资金面等真实数据源 skill。
 
 ## 目录结构
 
@@ -19,7 +19,8 @@
 │   │   ├── douyin-upload/       # 抖音 skill
 │   │   ├── bilibili-upload/     # B站 skill
 │   │   ├── xiaohongshu-upload/  # 小红书 skill
-│   │   └── kuaishou-upload/     # 快手 skill
+│   │   ├── kuaishou-upload/     # 快手 skill
+│   │   └── a-stock-data/        # A 股数据源 skill（含独立 .venv）
 │   └── commands/         # 自定义斜杠命令
 │       ├── sau-douyin.md
 │       ├── sau-bilibili.md
@@ -80,3 +81,19 @@ sau douyin upload-video --account myaccount --file video.mp4 --title "我的视�
 - Bilibili 登录须在本地终端交互执行（扫码）
 - 定时发布格式：`--schedule "2024-12-31 20:00"`
 - 多账号通过 `--account <name>` 区分管理
+
+### A 股数据源（a-stock-data skill）
+
+- Skill 文档位于 `.claude/skills/a-stock-data/SKILL.md`，内含可直接运行的 Python 代码片段（腾讯/东财/新浪/通达信/巨潮等多源行情、财务、资金面、公告、打板等数据接口），无需 API Key。
+- 依赖安装在独立虚拟环境 `.claude/skills/a-stock-data/.venv/`（与 social-auto-upload 的 3.12 环境互不影响）：
+  ```bash
+  cd .claude/skills/a-stock-data
+  source .venv/bin/activate
+  ```
+- 已装依赖：`mootdx requests pandas stockstats numpy baostock xlrd openpyxl akshare`
+- 主源被官方接口限流/封禁时，按 SKILL.md 中的「备用源速查」降级到备用数据源。
+- [AKShare](https://github.com/akfamily/akshare)（2.2万+ star，`akfamily/akshare`）作为补充数据源装在同一虚拟环境，覆盖股票/期货/期权/债券/宏观等更广的接口面，用法：
+  ```python
+  import akshare as ak
+  df = ak.stock_zh_a_hist(symbol="600498", period="daily", start_date="20250101", adjust="qfq")
+  ```
