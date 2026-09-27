@@ -19,12 +19,15 @@
 │   │   ├── douyin-upload/       # 抖音 skill
 │   │   ├── bilibili-upload/     # B站 skill
 │   │   ├── xiaohongshu-upload/  # 小红书 skill
-│   │   └── kuaishou-upload/     # 快手 skill
+│   │   ├── kuaishou-upload/     # 快手 skill
+│   │   └── stock-daily-report/  # 每日热点投研报告 skill
 │   └── commands/         # 自定义斜杠命令
 │       ├── sau-douyin.md
 │       ├── sau-bilibili.md
 │       ├── sau-xiaohongshu.md
-│       └── sau-kuaishou.md
+│       ├── sau-kuaishou.md
+│       └── stock-daily.md
+├── stock-research/       # 每日投研：fetch_hotspots.py 抓取财联社/韭研公社/同花顺
 └── CLAUDE.md             # 本文件
 ```
 
@@ -72,6 +75,7 @@ sau douyin upload-video --account myaccount --file video.mp4 --title "我的视�
 - `/sau-bilibili` - B站操作  
 - `/sau-xiaohongshu` - 小红书操作
 - `/sau-kuaishou` - 快手操作
+- `/stock-daily [YYYY-MM-DD]` - 每日A股热点投研报告（热门主线 + 3只潜力股）
 
 ## 注意事项
 

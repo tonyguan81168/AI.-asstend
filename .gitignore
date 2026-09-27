@@ -11,3 +11,6 @@ social-auto-upload/*.json
 # Media uploads
 social-auto-upload/videos/
 social-auto-upload/qrcode.png
+
+# Stock research raw data
+stock-research/reports/*/raw.json
