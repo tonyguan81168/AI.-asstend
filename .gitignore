@@ -14,3 +14,4 @@ social-auto-upload/qrcode.png
 
 # Stock research raw data
 stock-research/reports/*/raw.json
+stock-research/__pycache__/
