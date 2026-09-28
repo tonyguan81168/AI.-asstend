@@ -125,17 +125,38 @@ def fetch_cls_telegraph(date: dt.date, max_pages: int = 20) -> list[dict]:
 
 # ---------------------------------------------------------------- 韭研公社
 
+def _jygs_session() -> str | None:
+    """韭研登录态。优先 JYGS_SESSION（sessionToken 值）；否则从 JYGS_COOKIE 的 admin 字段里解析 sessionToken。
+
+    获取方法：浏览器登录韭研 → F12 → Network 任一请求 → Request Headers 的 Cookie，
+    其中 admin=... 解码后含 "sessionToken"。整串设为 JYGS_COOKIE 即可。
+    """
+    if os.environ.get("JYGS_SESSION"):
+        return os.environ["JYGS_SESSION"]
+    raw = os.environ.get("JYGS_COOKIE", "")
+    for kv in raw.split(";"):
+        k, _, v = kv.strip().partition("=")
+        if k == "SESSION":
+            return v
+        if k == "admin":
+            try:
+                return json.loads(urllib.parse.unquote(v)).get("sessionToken")
+            except ValueError:
+                pass
+    return None
+
+
 def _jygs_headers() -> dict:
-    """韭研 App 接口需登录态：浏览器登录后，把请求头里的 Cookie 整串设为环境变量 JYGS_COOKIE。"""
     ts = str(int(time.time() * 1000))
     token = hashlib.md5(f"Uu0KfOB8iUP69d3c:{ts}".encode()).hexdigest()
+    session = _jygs_session()
     return {
         "platform": "3",
         "timestamp": ts,
         "token": token,
         "Origin": "https://www.jiuyangongshe.com",
         "Referer": "https://www.jiuyangongshe.com/",
-        **({"Cookie": os.environ["JYGS_COOKIE"]} if os.environ.get("JYGS_COOKIE") else {}),
+        **({"Cookie": f"SESSION={session}"} if session else {}),
     }
 
 
@@ -147,7 +168,7 @@ def fetch_jygs_action(date: dt.date) -> list[dict]:
         _jygs_headers(),
     )
     if str(data.get("errCode")) not in ("0", "None") and data.get("msg"):
-        hint = "（请设置环境变量 JYGS_COOKIE，见 _jygs_headers 说明）" if "登录" in data["msg"] else ""
+        hint = "（请设置 JYGS_COOKIE 或 JYGS_SESSION，见 _jygs_session 说明）" if "登录" in data["msg"] else ""
         raise RuntimeError(f"韭研接口返回：{data['msg']}{hint}")
     fields = data.get("data") or []
     if not isinstance(fields, list):
