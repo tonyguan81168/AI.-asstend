@@ -13,6 +13,8 @@ description: 每日A股热点投研报告。综合财联社电报、韭研公社
    python3 stock-research/fetch_hotspots.py --date 2026-09-25
    ```
    脚本默认日期只跳过周末，**不识别法定节假日**：先确认目标日是否休市（如中秋、国庆），休市则用 `--date` 指定最近交易日。
+   韭研公社接口需登录：浏览器登录后复制请求头 Cookie，`export JYGS_COOKIE='...'` 再运行。
+   同花顺涨停池里 `limit_up_type`（一字/换手/T字）和 `is_again_limit`（1=开板后回封）是一进二筛选的关键字段。
    输出 `stock-research/reports/<date>/raw.json`。读取其中 `errors`：
    - 部分源失败 → 继续，但在报告「数据说明」里写明缺哪个源。
    - 全部失败（常见于云端环境网络受限）→ 用 WebSearch 检索「财联社 <日期> 涨停复盘」「韭研公社 异动解析 <日期>」「同花顺 热股榜」等补充，并在报告中注明为二手来源。

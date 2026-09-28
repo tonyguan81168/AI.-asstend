@@ -32,6 +32,7 @@ import datetime as dt
 import gzip
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -45,6 +46,7 @@ UA = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 TIMEOUT = 20
+CST = dt.timezone(dt.timedelta(hours=8))  # 容器常为 UTC，时间统一按北京时间
 
 
 def http_get(url: str, headers: dict | None = None) -> str:
@@ -78,34 +80,53 @@ def last_trading_day(today: dt.date) -> dt.date:
 
 # ---------------------------------------------------------------- 财联社
 
-def fetch_cls_telegraph(date: dt.date, limit: int = 100) -> list[dict]:
-    """财联社电报。rn 为条数；返回按时间倒序，只保留指定日期的条目。"""
-    params = {"app": "CailianpressWeb", "os": "web", "sv": "8.4.6", "rn": str(limit)}
-    url = "https://www.cls.cn/nodeapi/telegraphList?" + urllib.parse.urlencode(params)
-    data = json.loads(http_get(url, {"Referer": "https://www.cls.cn/telegraph"}))
-    rows = (data.get("data") or {}).get("roll_data") or []
-    out = []
-    for r in rows:
-        ts = dt.datetime.fromtimestamp(int(r.get("ctime", 0)))
-        if ts.date() != date:
-            continue
-        out.append(
-            {
-                "time": ts.strftime("%H:%M"),
-                "title": r.get("title") or "",
-                "content": re.sub(r"<[^>]+>", "", r.get("content") or r.get("brief") or "")[:500],
-                "important": r.get("level") in ("A", "B") or bool(r.get("recommend")),
-                "subjects": [s.get("subject_name") for s in r.get("subjects") or [] if s.get("subject_name")],
-                "stocks": [s.get("name") for s in r.get("stock_list") or [] if s.get("name")],
-            }
-        )
-    out.sort(key=lambda x: (not x["important"], x["time"]), reverse=False)
+def _cls_sign(params: dict) -> str:
+    q = urllib.parse.urlencode(sorted(params.items()))
+    return hashlib.md5(hashlib.sha1(q.encode()).hexdigest().encode()).hexdigest()
+
+
+def fetch_cls_telegraph(date: dt.date, max_pages: int = 20) -> list[dict]:
+    """财联社电报（v1/roll/get_roll_list，需 sign）。按 last_time 向前翻页，只保留指定日期。"""
+    day_start = dt.datetime.combine(date, dt.time.min, tzinfo=CST).timestamp()
+    last_time = int(dt.datetime.combine(date + dt.timedelta(days=1), dt.time.min, tzinfo=CST).timestamp())
+    out, seen = [], set()
+    for _ in range(max_pages):
+        params = {"app": "CailianpressWeb", "os": "web", "sv": "8.4.6", "rn": "50", "category": "", "last_time": str(last_time), "refresh_type": "1"}
+        params["sign"] = _cls_sign(params)
+        data = json.loads(http_get("https://www.cls.cn/v1/roll/get_roll_list?" + urllib.parse.urlencode(params),
+                                   {"Referer": "https://www.cls.cn/telegraph"}))
+        if data.get("errno") not in (0, "0"):
+            raise RuntimeError(f"cls errno={data.get('errno')} {data.get('msg')}")
+        rows = (data.get("data") or {}).get("roll_data") or []
+        if not rows:
+            break
+        for r in rows:
+            ctime = int(r.get("ctime", 0))
+            if ctime < day_start or r.get("id") in seen:
+                continue
+            seen.add(r.get("id"))
+            out.append(
+                {
+                    "time": dt.datetime.fromtimestamp(ctime, CST).strftime("%H:%M"),
+                    "title": r.get("title") or "",
+                    "content": re.sub(r"<[^>]+>", "", r.get("content") or r.get("brief") or "")[:500],
+                    "important": r.get("level") in ("A", "B") or bool(r.get("recommend")),
+                    "subjects": [x.get("subject_name") for x in r.get("subjects") or [] if x.get("subject_name")],
+                    "stocks": [x.get("name") for x in r.get("stock_list") or [] if x.get("name")],
+                }
+            )
+        oldest = min(int(r.get("ctime", 0)) for r in rows)
+        if oldest < day_start or oldest >= last_time:
+            break
+        last_time = oldest
+    out.sort(key=lambda x: (not x["important"], x["time"]))
     return out
 
 
 # ---------------------------------------------------------------- 韭研公社
 
 def _jygs_headers() -> dict:
+    """韭研 App 接口需登录态：浏览器登录后，把请求头里的 Cookie 整串设为环境变量 JYGS_COOKIE。"""
     ts = str(int(time.time() * 1000))
     token = hashlib.md5(f"Uu0KfOB8iUP69d3c:{ts}".encode()).hexdigest()
     return {
@@ -114,33 +135,24 @@ def _jygs_headers() -> dict:
         "token": token,
         "Origin": "https://www.jiuyangongshe.com",
         "Referer": "https://www.jiuyangongshe.com/",
+        **({"Cookie": os.environ["JYGS_COOKIE"]} if os.environ.get("JYGS_COOKIE") else {}),
     }
 
 
 def fetch_jygs_action(date: dt.date) -> list[dict]:
-    """韭研公社「异动解析」：按板块分组的涨停/异动个股及原因。
-
-    先调 App 接口，失败则回退解析网页 /action/<date> 的内嵌数据。
-    """
-    try:
-        data = http_post_json(
-            "https://app.jiuyangongshe.com/jystock-app/api/v1/action/field",
-            {"date": date.isoformat(), "pc": 1},
-            _jygs_headers(),
-        )
-        fields = data.get("data") or []
-        if isinstance(fields, list) and fields:
-            return _parse_jygs_fields(fields)
-    except Exception:  # noqa: BLE001 - 回退到网页解析
-        pass
-
-    html = http_get(f"https://www.jiuyangongshe.com/action/{date.isoformat()}")
-    # 网页为 Nuxt SSR，个股解析在 HTML 中；这里做宽松提取：板块名 + 个股名 + 解析文本
-    blocks = re.findall(r'class="[^"]*fs18-bold[^"]*"[^>]*>\s*([^<]{2,30})\s*<', html)
-    stocks = re.findall(r'class="[^"]*shrink fs15-bold[^"]*"[^>]*>\s*([^<]{2,12})\s*<', html)
-    if not blocks and not stocks:
-        raise RuntimeError("网页结构未识别（可能需要登录或页面改版）")
-    return [{"plate": b, "stocks": []} for b in blocks] + ([{"plate": "(未分组)", "stocks": [{"name": s} for s in stocks]}] if stocks else [])
+    """韭研公社「异动解析」：按板块分组的涨停/异动个股及原因。网页为纯前端渲染，只能走 App 接口。"""
+    data = http_post_json(
+        "https://app.jiuyangongshe.com/jystock-app/api/v1/action/field",
+        {"date": date.isoformat(), "pc": 1},
+        _jygs_headers(),
+    )
+    if str(data.get("errCode")) not in ("0", "None") and data.get("msg"):
+        hint = "（请设置环境变量 JYGS_COOKIE，见 _jygs_headers 说明）" if "登录" in data["msg"] else ""
+        raise RuntimeError(f"韭研接口返回：{data['msg']}{hint}")
+    fields = data.get("data") or []
+    if not isinstance(fields, list):
+        raise RuntimeError(f"韭研返回结构未识别：{str(data)[:200]}")
+    return _parse_jygs_fields(fields)
 
 
 def _parse_jygs_fields(fields: list) -> list[dict]:
@@ -172,7 +184,7 @@ def fetch_ths_limit_up(date: dt.date) -> list[dict]:
     """同花顺涨停池（含连板数、涨停原因、首次/最终封板时间）。"""
     params = {
         "page": "1",
-        "limit": "300",
+        "limit": "200",  # 接口上限 200
         "field": "199112,10,9001,330323,330324,330325,9002,330329,133971,133970,1968584,3475914,9003,9004",
         "filter": "HS,GEM2STAR",
         "order_field": "330324",
@@ -180,7 +192,17 @@ def fetch_ths_limit_up(date: dt.date) -> list[dict]:
         "date": date.strftime("%Y%m%d"),
     }
     url = "https://data.10jqka.com.cn/dataapi/limit_up/limit_up_pool?" + urllib.parse.urlencode(params)
-    data = json.loads(http_get(url, {"Referer": "https://data.10jqka.com.cn/datacenterph/limitup/limtupInfo.html"}))
+    ref = {"Referer": "https://data.10jqka.com.cn/datacenterph/limitup/limtupInfo.html"}
+    for attempt in range(3):
+        try:
+            data = json.loads(http_get(url, ref))
+            if data.get("status_code") != 0:
+                raise RuntimeError(f"同花顺涨停池返回：{data.get('status_msg')}")
+            break
+        except urllib.error.URLError:
+            if attempt == 2:
+                raise
+            time.sleep(2 * (attempt + 1))
     info = (data.get("data") or {}).get("info") or []
     out = []
     for r in info:
@@ -194,6 +216,8 @@ def fetch_ths_limit_up(date: dt.date) -> list[dict]:
                 "first_limit_time": _ts(r.get("first_limit_up_time")),
                 "last_limit_time": _ts(r.get("last_limit_up_time")),
                 "open_num": r.get("open_num"),  # 开板次数
+                "limit_up_type": r.get("limit_up_type"),  # 一字板 / 换手板 / T字板 …
+                "is_again_limit": r.get("is_again_limit"),  # 1 = 开板后回封
                 "order_amount": r.get("order_amount"),  # 封单额
                 "turnover_rate": r.get("turnover_rate"),
                 "market_cap": r.get("currency_value"),
@@ -205,7 +229,7 @@ def fetch_ths_limit_up(date: dt.date) -> list[dict]:
 
 def _ts(v) -> str | None:
     try:
-        return dt.datetime.fromtimestamp(int(v)).strftime("%H:%M:%S")
+        return dt.datetime.fromtimestamp(int(v), CST).strftime("%H:%M:%S")
     except (TypeError, ValueError):
         return None
 
@@ -256,10 +280,10 @@ def main() -> int:
     ap.add_argument("--out", help="输出 JSON 路径")
     args = ap.parse_args()
 
-    date = dt.date.fromisoformat(args.date) if args.date else last_trading_day(dt.date.today())
+    date = dt.date.fromisoformat(args.date) if args.date else last_trading_day(dt.datetime.now(CST).date())
     out_path = Path(args.out) if args.out else Path(__file__).parent / "reports" / date.isoformat() / "raw.json"
 
-    result: dict = {"date": date.isoformat(), "fetched_at": dt.datetime.now().isoformat(timespec="seconds"), "errors": {}}
+    result: dict = {"date": date.isoformat(), "fetched_at": dt.datetime.now(CST).isoformat(timespec="seconds"), "errors": {}}
     jobs = {
         "cls_telegraph": lambda: fetch_cls_telegraph(date),
         "jygs_action": lambda: fetch_jygs_action(date),
