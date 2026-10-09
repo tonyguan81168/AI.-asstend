@@ -28,6 +28,8 @@
 │       ├── sau-kuaishou.md
 │       └── stock-daily.md
 ├── stock-research/       # 每日投研：fetch_hotspots.py 抓取财联社/韭研公社/同花顺
+│   ├── trades.csv        # 交易记录（trade_stats.py 统计胜率/盈亏比/期望/回撤）
+│   └── holdings.json     # 当前持仓
 └── CLAUDE.md             # 本文件
 ```
 
