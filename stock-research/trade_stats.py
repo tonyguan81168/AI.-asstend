@@ -25,7 +25,7 @@ STAMP_TAX = 0.0005  # 印花税，仅卖出
 TRANSFER = 0.00001  # 过户费，双向
 
 # 放大仓位的门槛
-MIN_SAMPLES = 30
+MIN_SAMPLES = 100  # 用户铁律：稳定盈利 100 笔后才放大本金
 MIN_EXPECTANCY = 0.005  # 扣费后每笔平均收益 ≥ 0.5%
 MAX_AVG_LOSS = 0.03  # 平均亏损 ≤ 3%
 
