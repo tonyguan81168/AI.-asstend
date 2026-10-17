@@ -16,9 +16,15 @@ def kline(code):
     f = f'{KDIR}/{code}.json'
     if os.path.exists(f):
         return json.load(open(f))
-    txt = fh.http_get(f'https://d.10jqka.com.cn/v6/line/hs_{code}/00/last.js',
-                      {'Referer': 'https://stockpage.10jqka.com.cn/'})
-    data = json.loads(txt[txt.index('(') + 1: txt.rindex(')')])['data']
+    for attempt in range(4):
+        try:
+            txt = fh.http_get(f'https://d.10jqka.com.cn/v6/line/hs_{code}/00/2026.js',
+                              {'Referer': 'https://stockpage.10jqka.com.cn/'})
+            data = json.loads(txt[txt.index('(') + 1: txt.rindex(')')])['data']
+            break
+        except Exception:
+            if attempt == 3: raise
+            time.sleep(2 * (attempt + 1))
     k = {}
     for row in data.split(';'):
         p = row.split(',')
